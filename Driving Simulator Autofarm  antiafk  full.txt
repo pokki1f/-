@@ -1,0 +1,314 @@
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHeptc/Kavo-UI-Library/main/source.lua"))()
+local Window = Library.CreateLib("Driving Simulator Hack", "Midnight")
+
+
+local Tab = Window:NewTab("main")
+local Section = Tab:NewSection("HACK")
+
+Section:NewButton("Autofarm (open in the car) (ต้องอยู่บนรถ)", "Autofarm", function()
+    local Debris = game:GetService("Debris")
+
+local renv = getrenv()
+local Realshared = renv.shared
+
+local raceColliders = workspace["$raceColliders"]
+local Placeables = workspace["%Placeables"]
+
+local player = Realshared.player
+
+local races = Realshared.asset("/races")
+
+local Go = Realshared.remote("/races/Go")
+local SignalInterest = Realshared.remote("/races/SignalInterest")
+local StartRace = Realshared.remote("/races/StartRace")
+
+local CarTracker = select(2, pcall(Realshared.import, "/pcar/CarTracker"))
+local ClientCarState = select(2, pcall(Realshared.import, "/pcar/ClientCarState"))
+
+local ClientRaceState = select(2, pcall(Realshared.import, "/prace/ClientRaceState.client"))
+
+local BindableEvent = Instance.new("BindableEvent")
+
+local function PlaceablesChildAdded(Child)
+	if Child.Name == "Checkpoint" then
+		local RootPart = Child.RootPart
+
+		local FormerPosition = RootPart.Position
+		repeat
+			if Child.Parent and RootPart.Position ~= FormerPosition then
+				BindableEvent:Fire()
+			end
+			FormerPosition = RootPart.Position
+			task.wait(.1)
+		until not Child.Parent
+		return
+	else
+		return
+	end
+	return
+end
+
+local function PlaceablesChildRemoved()
+	BindableEvent:Fire()
+	return
+end
+
+local function IsraceColliderLoaded(raceId, raceColliderId)
+	return raceColliders[raceId]:FindFirstChild(tostring(raceColliderId)) and true or false
+end
+
+local function LoadraceCollider(raceId, raceColliderId)
+	local CarFromDriver = CarTracker.getCarFromDriver(player)
+
+	local RootPart = CarFromDriver.RootPart
+
+	if not RootPart.Anchored then
+		RootPart.Anchored = true
+	end
+	CarFromDriver:SetPrimaryPartCFrame(races[raceId].Checkpoints[tostring(raceColliderId)].ArrowRefCFrame.Value)
+	raceColliders[raceId]:WaitForChild(tostring(raceColliderId))
+	if RootPart.Anchored then
+		RootPart.Anchored = false
+	end
+	return
+end
+
+local function HitraceCollider(raceId, raceColliderId)
+	CarTracker.getCarFromDriver(player):SetPrimaryPartCFrame(raceColliders[raceId][tostring(raceColliderId)].CFrame)
+	return
+end
+
+local Blacklist = {
+	"CreateRace",
+	"RaceNotifier",
+	"ServerAlert"
+}
+local OldNameCall = nil
+local function hookmetamethodFunction(Self, ...)
+	if table.find(Blacklist, Self.Name) then
+		return
+	end
+	return OldNameCall(Self, ...)
+end
+
+local function StartRaceOnClientEvent(raceId)
+	Go.OnClientEvent:Wait()
+	for Count1 = 1, require(races[raceId].Module).laps do
+		for Count2 = 1, raceColliders:WaitForChild(raceId).NumCheckpoints.Value do
+			if not ClientRaceState.racing then
+				break
+			end
+			if not IsraceColliderLoaded(raceId, Count2) then
+				LoadraceCollider(raceId, Count2)
+			end
+			HitraceCollider(raceId, Count2)
+			BindableEvent.Event:Wait()
+		end
+	end
+	return
+end
+
+local function GetraceQuality(race)
+	local State = race.State
+
+	return State.NumPlayers.Value / State.TimeUntilStart.Value * require(race.Module).startCountdown
+end
+
+local function GetHighestQualityrace()
+	local HighestraceQuality = -math.huge
+	local HighestQualityrace = nil
+	local function foreachi(_, Value)
+		local State = Value.State
+
+		local NumPlayers = State.NumPlayers
+
+		if NumPlayers.Value < table.getn(Value.Places:GetChildren()) and NumPlayers.Value > 0 and not State.RaceActive.Value then
+			local raceQuality = GetraceQuality(Value)
+			if raceQuality > HighestraceQuality then
+				HighestraceQuality = raceQuality
+				HighestQualityrace = Value
+			end
+			return
+		else
+			return
+		end
+		return
+	end
+	table.foreachi(races:GetChildren(), foreachi)
+	if HighestQualityrace then
+		print(HighestQualityrace, HighestQualityrace.State.TimeUntilStart.Value * require(HighestQualityrace.Module).startCountdown)
+	end
+	return HighestQualityrace
+end
+
+local HighestQualityrace = nil
+local FormerHighestQualityrace = nil
+local EndValue = 2500
+local Reverse = false
+local Speed = 100
+local function Update()
+	if ClientCarState.isDriving and not ClientRaceState.racing then
+		for Count = 1, EndValue, 6 do
+			if not ClientCarState.isDriving or ClientRaceState.racing then
+				break
+			end
+			if HighestQualityrace then
+				if HighestQualityrace.State.TimeUntilStart.Value * require(HighestQualityrace.Module).startCountdown <= 1 then
+					SignalInterest:FireServer(HighestQualityrace.Name)
+				end
+				if HighestQualityrace ~= FormerHighestQualityrace then
+					FormerHighestQualityrace = HighestQualityrace
+				end
+			end
+			HighestQualityrace = GetHighestQualityrace()
+			CarTracker.getCarFromDriver(player):SetPrimaryPartCFrame(CFrame.new(0, 0, not Reverse and Count or Reverse and EndValue - Count))
+			task.wait(1 / Speed)
+		end
+		Reverse = not Reverse
+		return
+	else
+		return
+	end
+	return
+end
+
+local function Initialize()
+	if not ClientCarState.isDriving then
+		local Hint = Instance.new("Hint")
+		Hint.Text = "Please, Spawn/Enter Your Car "
+		Hint.Parent = workspace
+		Debris:AddItem(Hint, 5)
+		return
+	end
+	Placeables.ChildAdded:Connect(PlaceablesChildAdded)
+	Placeables.ChildRemoved:Connect(PlaceablesChildRemoved)
+	OldNameCall = hookmetamethod(game, "__namecall", hookmetamethodFunction)
+	StartRace.OnClientEvent:Connect(StartRaceOnClientEvent)
+	workspace.Gravity = 0
+	while true do
+		Update()
+		task.wait(.1)
+	end
+	return
+end
+Initialize()
+end)
+
+Section:NewButton("Anti afk ", "antiafk", function()
+    local Rice = Instance.new("ScreenGui")
+local Main = Instance.new("Frame")
+local Title = Instance.new("TextLabel")
+local Credits = Instance.new("TextLabel")
+local Activate = Instance.new("TextButton")
+local UICorner = Instance.new("UICorner")
+local OpenClose = Instance.new("TextButton")
+local UICorner_2 = Instance.new("UICorner")
+
+Rice.Name = "Rice"
+Rice.Parent = game.CoreGui
+Rice.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+Main.Name = "Main"
+Main.Parent = Rice
+Main.BackgroundColor3 = Color3.fromRGB(0, 0, 45)
+Main.BorderSizePixel = 0
+Main.Position = UDim2.new(0.321207851, 0, 0.409807354, 0)
+Main.Size = UDim2.new(0, 295, 0, 116)
+Main.Visible = false
+Main.Active = true
+Main.Draggable =  true
+
+Title.Name = "Title"
+Title.Parent = Main
+Title.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+Title.BorderSizePixel = 0
+Title.Size = UDim2.new(0, 295, 0, 16)
+Title.Font = Enum.Font.GothamBold
+Title.Text = ""
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextScaled = true
+Title.TextSize = 12.000
+Title.TextWrapped = true
+
+Credits.Name = ""
+Credits.Parent = Main
+Credits.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+Credits.BorderSizePixel = 0
+Credits.Position = UDim2.new(0, 0, 0.861901641, 0)
+Credits.Size = UDim2.new(0, 295, 0, 16)
+Credits.Font = Enum.Font.GothamBold
+Credits.Text = ""
+Credits.TextColor3 = Color3.fromRGB(255, 255, 255)
+Credits.TextScaled = true
+Credits.TextSize = 12.000
+Credits.TextWrapped = true
+
+Activate.Name = "Activate"
+Activate.Parent = Main
+Activate.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+Activate.BorderColor3 = Color3.fromRGB(27, 42, 53)
+Activate.BorderSizePixel = 0
+Activate.Position = UDim2.new(0.0330629945, 0, 0.243326917, 0)
+Activate.Size = UDim2.new(0, 274, 0, 59)
+Activate.Font = Enum.Font.GothamBold
+Activate.Text = "Activate"
+Activate.TextColor3 = Color3.fromRGB(0, 255, 127)
+Activate.TextSize = 43.000
+Activate.TextStrokeColor3 = Color3.fromRGB(102, 255, 115)
+Activate.MouseButton1Down:connect(function()
+	local vu = game:GetService("VirtualUser")
+	game:GetService("Players").LocalPlayer.Idled:connect(function()
+		vu:Button2Down(Vector2.new(0,0),workspace.CurrentCamera.CFrame)
+		wait(1)
+		vu:Button2Up(Vector2.new(0,0),workspace.CurrentCamera.CFrame)
+	end)
+end)
+
+
+UICorner.Parent = Activate
+
+OpenClose.Name = "Open/Close"
+OpenClose.Parent = Rice
+OpenClose.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+OpenClose.Position = UDim2.new(0.353924811, 0, 0.921739101, 0)
+OpenClose.Size = UDim2.new(0, 247, 0, 35)
+OpenClose.Font = Enum.Font.GothamBold
+OpenClose.Text = "Open/Close เปิด/ปิด"
+OpenClose.TextColor3 = Color3.fromRGB(255, 255, 255)
+OpenClose.TextSize = 14.000
+
+UICorner_2.Parent = OpenClose
+
+local function NERMBF_fake_script() -- OpenClose.LocalScript 
+	local script = Instance.new('LocalScript', OpenClose)
+
+	local frame = script.Parent.Parent.Main
+	
+	script.Parent.MouseButton1Click:Connect(function()
+		frame.Visible = not frame.Visible
+	end)
+end
+coroutine.wrap(NERMBF_fake_script)()
+end)
+
+local Tab = Window:NewTab("Player / ผู้เล่น")
+local Section = Tab:NewSection("Player")
+
+Section:NewTextBox("Character speed", "Type in a number to make the speed u want", function(txt)
+	game.Players.LocalPlayer.Character.Humanoid.WalkSpeed = txt
+end)
+Section:NewSlider("speed but slider", "Yo", 500, 0, function(speed)
+    game.Players.LocalPlayer.Character.Humanoid.WalkSpeed = speed
+end)
+Section:NewButton("Infinite yield", "alot of better", function()
+	loadstring(game:HttpGet('https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source'))()
+end)
+
+local Tab = Window:NewTab("setting / ตั่งค่า ")
+local Section = Tab:NewSection("setting (กด e เปิดปิดฟังชั่น")
+Section:NewKeybind("Toggle ui", "makes the gui invisible, press again to make it visible", Enum.KeyCode.RightAlt, function()
+	Library:ToggleUI()
+end)
+
+local Tab = Window:NewTab("credit / เครดิต ")
+local Section = Tab:NewSection("BY.WTFHACKER P#B#")
